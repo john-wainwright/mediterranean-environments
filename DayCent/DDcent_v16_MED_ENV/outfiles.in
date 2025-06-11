@@ -1,0 +1,32 @@
+Output (0/1)    file_name       description
+1               biowk.out       # weekly above and below ground live carbon
+1               soiln.out       # daily soil ammonium and nitrate by layer
+1               soiltavg.out    # daily average soil temperature by layer
+1               soiltmax.out    # daily maximum soil temperature by layer
+1               soiltmin.out    # daily minimum soil temperature by layer
+1               stemp_dx.out    # daily soil temperature every few cm (HUGE)!
+1               vswc.out        # daily volumetric soilwater content by layer
+1               watrbal.out     # daily water balance
+1               wfps.out        # daily water filled pore space by layer
+1               co2.out         # daily CO2 concentrations by layer
+1               wflux.out       # daily water flux through the bottom of soil layers
+1               mresp.out       # weekly maintenance respiration
+1               year_sum.out    # yearly gas fluxes
+1               livecwk.out     # weekly live C
+1               deadcwk.out     # weekly dead C
+1               soilcwk.out     # weekly soil C
+1               syscwk.out      # weekly system C
+1               tgmonth.out     # monthly trace gas fluxes
+1		bio.out         # Daily above and below ground live carbon
+1               cflows.out      # Daily carbon flows to soil organic matter pools
+1               co2.out         # Daily CO2 concentrations by layer
+1               daily.out       # Daily evapo, defac, soil temperature, snow water, and growing degree day variables
+1               dc_sip.csv      # Daily evaporation, transpiration, respiration, system C, and NPP
+1               deadc.out       # Daily carbon in dead plant material
+1               dels.out        # Daily delta 13C/14C values
+1               dN2lyr.out      # Daily N2 fluxes due to denitrification by soil layer
+1               dN2Olyr.out     # Daily N2O fluxes due to denitrification by soil layer
+1               livec.out       # Daily carbon in live plant material
+1               methane.out     # Methanogenesis and Methane Oxidation
+1               summary.out     # Daily climate, trace gas, and heterotrophic respiration
+1               sysc.out        # Daily system carbon
