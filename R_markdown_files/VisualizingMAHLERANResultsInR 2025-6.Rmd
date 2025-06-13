@@ -1,0 +1,721 @@
+---
+title: "Visualizing MAHLERAN Results in R"
+author: "John Wainwright"
+date: "`r format (Sys.Date (), format = '%d %B %Y')`"
+output:
+  pdf_document: default
+  word_document: default
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+
+# Note the checking for the presence of libraries again and installing them if not 
+#   available on the current system
+if (!require (tidyverse)){
+  install.packages ("tidyverse")
+  library (tidyverse)
+}
+
+if (!require (grid)){
+  install.packages ("grid")
+  library (grid)
+}
+
+if (!require (lubridate)){
+  install.packages ("lubridate")
+  library (lubridate)
+}
+
+if (!require (terra)){
+  install.packages ("terra")
+  library (terra)
+}
+
+```
+
+## Getting Started
+
+Looking at the MAHLERAN manual, there are two sorts of output file: time series, which have the extension .dat, and maps which have the extension .asc. We'll look at the time-series data first:
+
+----------------   ----------------------------------------------------------------
+File Name	         Description 
+----------------   ----------------------------------------------------------------
+hydro***.dat	     Hydrological results for outflow from the plot / catchment
+
+sedtr***.dat	     Sediment results for outflow from the plot / catchment
+
+nutri***.dat	     Dissolved nutrient concentrations 
+
+p_nut***.dat	     Particulate-bound nutrient concentrations 
+
+seddetach***.dat	 Total detached sediment by size class
+
+seddepos***.dat	   Total deposited sediment by size class
+
+seddepth***.dat	   Total sediment depth by size class
+
+sedveloc***.dat	   Total average sediment velocity by size class
+
+seddisch***.dat	   Total sediment discharge by size class
+
+sedpropn***.dat	   Total sediment proportion by size class
+
+sedconcn***.dat	   Average sediment concentration by size class
+
+----------------   ----------------------------------------------------------------
+
+Where the *** in each case is a number from 001 to 999 representing the particular run number (for which you can check the inputs used in the respective param***.dat file).
+
+The first two files on this list are the ones you're most likely to use, in that they give the main hydrological outputs (and also the rainfall input for convenience) and the main sediment-transport outputs.
+
+Make sure this Rmd file is in your project folder as defined when you ran the MAHLERAN model before, so that the "Output" folder is in the same folder as this file.  Use Session --> Set Working Directory --> To Source File Location to set the working directory to the correct location. Click on the little arrow next to the path name at the top of the Console pane and looking at the list of files in the Files pane in RStudio.  If you can't see the Output folder at this stage, the remaining steps are unlikely to work properly.
+
+Earlier, you opened the file "hydro001.dat" in a text editor to see what it looks like.  If you can't remember, do so again and you should see it is in space-delimited format, with no metadata and no header line.  Thus, we can use the read.table command to get the values into R:
+
+```{r}
+mahleranOutputFolder <- "./Output/"
+hydroFile <- "hydro001.dat"
+
+hydrograph <- read.table (paste0 (mahleranOutputFolder, hydroFile), 
+                           header = FALSE, sep = "")
+
+head (hydrograph)
+```
+
+There are 12 variables in the file.  As there wasn't a header, R has defaulted to calling them V1 ... V12, but looking at the Manual, we can see they represent: time, rainfall, plot discharge, 3 cross-section discharges, 3 cross-section depths, 3 cross-section velocities (time in seconds, rainfall in mm s^-1^ discharges in mm^3^ s^–1^ , depths in mm, velocities in mms–1.  Cross sections are at 25%, 50% and 75% from the top of the plot, though we'll ignore them for the time being.)  Let's give the variables more meaningful names to make our scripting easier to follow:
+
+```{r}
+ names (hydrograph) <- c ("time", "rain", "qOutflow", 
+                          "qSect1", "qSect2", "qSect3", 
+                          "dSect1", "dSect2", "dSect3", 
+                          "vSect1", "vSect2", "vSect3")
+  #
+  # names for variables:
+  #   time = time since start of simulation in seconds
+  #   rain = rainfall intensity in mm/s in input file, converted to mm/h below
+  #   qOutflow = outflow from plot/slope/catchment in mm3/s in input file, converted to litres below
+  #   qSect1, qSect2, qSect3 - flows at three cross sections in mm3/s in input file, converted to litres below
+  #   dSect1, dSect2, dSect3 - mean flow depths at three cross sections in mm in input file
+  #   vSect1, vSect2, vSect3 - mean flow depths at three cross sections in mm in input file
+  
+```
+
+And then we'll do some unit conversions to avoid repetition later:
+
+```{r}
+# unit conversions
+hydrograph$rain <- hydrograph$rain * 3600.  ## to mm/h
+hydrograph$qOutflow <- hydrograph$qOutflow / 1000000.  ## to litres
+hydrograph$qSect1 <- hydrograph$qSect1 / 1000000.  ## to litres
+hydrograph$qSect2 <- hydrograph$qSect2 / 1000000.  ## to litres
+hydrograph$qSect3 <- hydrograph$qSect3 / 1000000.  ## to litres
+
+```
+
+So our data now look like this:
+
+```{r}
+head (hydrograph)
+```
+
+Repeating the process with the file "sedtr001.dat" you should see it is also in space-delimited format, with no metadata and no header line.  Again, we can use the read.table command to get the values into R:
+
+```{r}
+sediFile <- "sedtr001.dat"
+
+sedigraph <- read.table (paste0 (mahleranOutputFolder, sediFile), 
+                           header = FALSE, sep = "")
+
+head (sedigraph)
+```
+
+This time we have 16 columns of data (V1 ... 16), which the Manual tells us are time [in seconds], plot sediment output [kg s^-1^], plot sediment flux [kg m^-1^ s^-1^], 3 cross-section fluxes [kg m^-1^ s^-1^], plot yield per unit area [kg m^-2^ s^-1^], 3 cross-section yields [kg m^-2^ s^-1^], and plot particle size out (proportions of the total for each of the six size classes).
+
+Again, let's give the variables better names
+
+```{r}
+names(sedigraph) <- c ("time", "sedPlot", "plotFlux", 
+                       "sedCS1", "sedCS2", "sedCS3", 
+                       "plotYield", "yieldCS1", "yieldCS2", "yieldCS3", 
+                       "phi1", "phi2", "phi3", "phi4", "phi5", "phi6")
+#
+# names for variables:
+#   time = time since start of simulation in seconds
+#   sedPlot = total sediment coming off plot in kg/s
+#   plotFlux = flux of sediment coming off plot in kg/m/s
+#   sedCS1 = sediment crossing section 1 in kg/s
+#   sedCS2 = sediment crossing section 2 in kg/s
+#   sedCS3 = sediment crossing section 3 in kg/s
+#   plotYield = plot sediment yield in kg/m^2/s
+#   yieldCS1 = sediment yield crossing section 1 in kg/m2/s
+#   yieldCS2 = sediment yield crossing section 2 in kg/m2/s
+#   yieldCS3 = sediment yield crossing section 3 in kg/m2/s
+#   phi1 = plot sediment outflow -- proportion < 0.063 mm
+#   phi2 = plot sediment outflow -- proportion >= 0.063 mm - 0.25 mm
+#   phi3 = plot sediment outflow -- proportion >= 0.25 mm - 0.5 mm 
+#   phi4 = plot sediment outflow -- proportion >= 0.5 mm - 2 mm
+#   phi5 = plot sediment outflow -- proportion >= 0.2 mm - 12 mm 
+#   phi6 = plot sediment outflow -- proportion >= 12 mm 
+#
+
+head (sedigraph)
+```
+
+We can also look at some simple summary statistics for the hydrograph data:
+
+```{r}
+summary (hydrograph)
+```
+
+and for the sedigraph data:
+
+```{r}
+summary (sedigraph)
+```
+
+Note that read.table is a very flexible function with lots of different options for reading tabular data into R.  For reference (i.e. do NOT run this code chunk):
+
+```{r, eval = FALSE}
+read.table (file, header = FALSE, sep = "", quote = "\"'",
+            dec = ".", numerals = c("allow.loss", "warn.loss", "no.loss"),
+            row.names, col.names, as.is = !stringsAsFactors,
+            na.strings = "NA", colClasses = NA, nrows = -1,
+            skip = 0, check.names = TRUE, fill = !blank.lines.skip,
+            strip.white = FALSE, blank.lines.skip = TRUE,
+            comment.char = "#",
+            allowEscapes = FALSE, flush = FALSE,
+            stringsAsFactors = FALSE,
+            fileEncoding = "", encoding = "unknown", text, skipNul = FALSE)
+
+```
+
+
+
+## Visualizing this Output
+
+The tidyverse has a very powerful plotting capability called ggplot (we can also use it without loading the rest of the tidyverse by opening the ggplot2 library).
+
+To take full advantage of ggplot, we need first to do a little change to the layout of the data.  At the moment the hydrograph and sedigraph data frames are in what's called wide format; in other words, it looks like a table with column headings relating to the variable names, and rows for each set of values (which in this case refer to a specific year).  Although ggplot can use data in this format (as we'll see in a bit), it is far more powerful if we change our data to what's called long format by stacking the variables on top of each other.  To make it simpler, we'll first create a data frame with just the three variables we're interested in:
+
+```{r}
+combinedData <- hydrograph %>%
+  select (time, rain, qOutflow) %>%
+  left_join (sedigraph, by = c ("time")) %>%
+  select (time, rain, qOutflow, sedPlot)
+```
+
+So in these stages, we've taken the time, rain and qOutflow values from the hydrograph data, used left_join to add the sedigraph data, matching the rows by the time variable, and then using select again to keep only sedPlot from the sedigraph data.  Using left-join like this is a vary powerful way of allowing us to combine data for analysis -- it would be equally easy to do in a spreadsheet for datasets like this with common time values, but imagine what you would have to do if the timesteps were different.
+
+
+We can then use pivot_longer from tidyverse to create the long format:
+
+```{r}
+combinedDataLong <- combinedData %>%
+  pivot_longer (-time, names_to = "variable")
+
+head (combinedDataLong, 8)
+```
+
+The format of ggplot will appear a little strange at first, but makes sense when you get used to it.  You need to specify a data source, aesthetics (which are minimally the x and y values, but can also include colours and line types etc.), and a geometry (points, lines, bars, and many more).  So let's try a simple call to plot all our data as lines:
+
+```{r}
+ggplot (data = combinedDataLong) +
+  geom_line (aes (x = time, y = value, colour = variable))
+```
+
+Of course this is still rubbish because of the very different scales, but it's produced a graph with all our data on with just two lines of code, including a basic legend.
+
+But there is an option called facet_wrap in ggplot to plot the data from the different variables into separate graphs:
+
+```{r}
+combinedDataLong %>%
+  ggplot () +
+    geom_line (aes (x = time, y = value)) +
+    facet_wrap (~variable, scales = "free") +
+    labs (x = "time  [s]")
+```
+
+Check what happens when you remove the scales = "free" part of the facet_wrap function call.  Can you think why it might be useful to have both forms of graph when exploring your data?
+
+And actually, rather than plotting them side-by-side, what about plotting them one above each other:
+
+```{r}
+combinedDataLong %>%
+  ggplot () +
+    geom_line (aes (x = time, y = value)) +
+    facet_wrap (~variable, scales = "free", ncol = 1) +
+    labs (x = "time  [s]")
+```
+
+This approach is starting to look more useful for visualization.  This is a very powerful way of looking at multiple variables at the same time.
+
+We can add different labels for each of the different facets in this graph, but again it's a bit fussy.  Let's return to wide format and generate the panels separately, and then add them back together.  We also traditionally put rainfall at the top, whereas facet_wrap has given us the graphs in alphabetical order of the variable names.  Rainfall is also usually plotted as bars pointing downwards, so let's see if we can do that using geom_col (columns) to give that format:
+
+```{r}
+#calculate some useful statistics
+maxTime <- max (hydrograph$time)
+maxRain <- max (hydrograph$rain)
+dt <- hydrograph$time[2] - hydrograph$time[1]
+totalRain <- sum (hydrograph$rain / 3600.) * dt
+
+rainPanel <- ggplot (hydrograph) + 
+  geom_col (aes (x = time, y = rain), width = 1, colour = "black") + 
+  scale_y_reverse (limits = c (maxRain * 1.6, 0)) +
+  ylab (expression (paste ("rainfall mm h"^-1))) + 
+  theme (axis.title.x = element_blank (),
+         axis.text.x = element_blank ())
+
+rainPanel
+```
+
+Notice two changes here: the x axis labelling has been switched off for reasons that will become clearer shortly, and I've stored the graph as a data structure, and then used its name to plot it out (comment out the line with the name in to see what happens).
+
+We can add other information to an existing plot if we store it this way.  Say I want to add an annotation showing the total event rainfall, I can simply take the existing stored ggplot object and add to it:
+
+```{r}
+rainPanel <- rainPanel + 
+  annotate ("text", 
+            x = 0.75 * maxTime, 
+            y = 1.25 * maxRain, 
+            label = paste ("total rainfall:",
+                           round (totalRain, digits = 1),
+                           "mm", sep = " "),
+            colour = "blue")
+
+rainPanel
+```
+
+Of course, we could have added the annotate call as part of the original definition, but you now see the flexibility of this approach.
+
+We can then follow through the same process to produce panels for the other variables:
+
+```{r}
+#
+# calculate stats
+#
+maxFlow <- max (hydrograph$qOutflow)
+totalFlow <- sum (hydrograph$qOutflow) * dt
+maxSed <- max (sedigraph$sedPlot)
+totalSed <- sum (sedigraph$sedPlot) * dt
+
+flowPanel <- ggplot (hydrograph) +
+  geom_line (aes (x = time, y = qOutflow)) + 
+  xlab ("time  s") + 
+  ylab (expression (paste ("discharge  l s"^-1))) + 
+  annotate ("text", 
+            x = 0.25 * maxTime, 
+            y = 0.75 * maxFlow, 
+            label = paste ("total runoff:", 
+                           round (totalFlow, digits = 1), 
+                           "l", sep = " "))  +
+  theme (axis.title.x = element_blank (),
+         axis.text.x = element_blank ())
+
+flowPanel
+
+sedPanel <- ggplot (sedigraph) + 
+  geom_line (aes (x = time, y = sedPlot)) + 
+  xlab ("time  s") + 
+  ylab (expression (paste ("sed loss  kg s"^-1))) + 
+  annotate ("text", 
+            x = 0.25 * maxTime, 
+            y = 0.75 * maxSed, 
+            label = paste ("total sediment:", 
+                           round (totalSed, 
+                                  digits = 3), 
+                           "kg", sep = " ")) +
+  theme (axis.title.x = element_blank (),
+         axis.text.x = element_blank ())
+
+sedPanel
+
+phiPanel <- ggplot (sedigraph, aes (x = time)) + 
+  geom_line (aes (y = phi1, colour = "1")) + 
+  geom_line (aes (y = phi2, colour = "2")) + 
+  geom_line (aes (y = phi3, colour = "3")) + 
+  geom_line (aes (y = phi4, colour = "4")) + 
+  geom_line (aes (y = phi5, colour = "5")) + 
+  geom_line (aes (y = phi6, colour = "6")) + 
+  labs (x = "time  s",
+        y = "sed proportion",
+        colour = "phi") +
+  theme (legend.position = "inside",
+         legend.position.inside = c (0.15, 0.9),
+         legend.direction = "horizontal")
+
+phiPanel
+```
+
+Notice for the last panel I have added the x-axis information.  Now we could copy and paste all of these images into our favourite graphics editor to stack them up, but it's much easier to do it directly in R.
+There are two steps: first we create an object that has all of our panels as a set of graphics objects (Grobs), and then we use the grid package to plot it.
+
+```{r}
+allPanels <- rbind (ggplotGrob (rainPanel),
+                    ggplotGrob (flowPanel),
+                    ggplotGrob (sedPanel),
+                    ggplotGrob (phiPanel),
+                    size = "max")
+grid.newpage ()
+grid.draw (allPanels)
+  
+
+```
+
+The y axis labels overwrite and the legend is too big, but if you use the function windows() and then plot in a larger window, this issue goes away (so we don't have to tweak font sizes). Do this in the console if your window vanishes as soon as it's finished:
+
+```{r}
+windows ()
+grid.newpage ()
+grid.draw (allPanels)
+
+```
+
+Even better, we don't have to copy and paste or save the final window, we can save the file directly from R:
+
+```{r}
+ggsave (filename = "./mahleranOutput.png", allPanels,
+        width = 210, height = 250, units = "mm")
+```
+
+You can save in different formats just by changing the filename extension ("eps", "ps", "tex" (pictex), "pdf", "jpeg", "tiff", "png", "bmp", "svg" or "wmf" (on windows only) are the different options).
+
+We now have a publication-quality reproducible output of our results.
+
+In terms of data management, it might be better to save our results (e.g. the image) into a separate Results folder within the project, so you have versions of the script, input data, and output results all in separate places.
+
+
+## At Last!  A(nother) Benefit of Coding
+So far we have used code that has read in data and plotted them out.  We can read in data from a new file and use the same code if the data frame name is the same.  But what if we want to make the process much more flexible and produce output for any input that has the right format?  This is where being able to define our own functions comes into play.
+
+We define a function as follows.  This very simple example takes two input values and adds them together:
+
+```{r}
+simpleFunction <- function (a, b){
+  answer <- a + b
+  return (answer)
+}
+```
+Nothing seems to have happened -- but if you look over in the Environment pane in RStudio (top right), you should see your simpleFunction now appears as being available to you.  We can now call this as a function in the same way as any other:
+
+```{r}
+simpleFunction (1, 2)
+```
+
+It's not a very good function as it's easy to break:
+
+```{r, error = TRUE}
+# this call WILL produce an error
+simpleFunction ("fish", "bananas")
+```
+
+but it shows the principle: we pass input values in brackets to the function definition, and use return to return a value to the user.  That returned value can be used in the same way as other variables:
+
+```{r}
+addAB <- simpleFunction (1, 2)
+
+addAB
+```
+So let's make a more complicated function where we collect all the panel plots to automate the process, starting from reading the data to saving the file.  The only difference from the code above is the part that specifies the filename using the number of the run rather than directly as the filename:
+
+```{r}
+mahleranPlotOutflows <- function (runNumber = 1,
+                                  filePath = "./",
+                                  outPath = "./",
+                                  outFile = "mahleranOutput.png"){
+  # define file names based on path and run number
+  if (runNumber < 10){
+    hydroFile <- paste0 (filePath, 'hydro00', runNumber, '.dat')
+    sediFile  <- paste0 (filePath, 'sedtr00', runNumber, '.dat') 
+  }
+  if (runNumber >= 10 & runNumber < 100) {
+    hydroFile <- paste0 (filePath, 'hydro0', runNumber, '.dat')
+    sediFile  <- paste0 (filePath, 'sedtr0', runNumber, '.dat') 
+  } 
+  if (runNumber >= 100 & runNumber < 1000) {
+    hydroFile <- paste0 (filePath, 'hydro', runNumber, '.dat')
+    sediFile  <- paste0 (filePath, 'sedtr', runNumber, '.dat') 
+  }
+  
+  #read in files 
+  hydrograph <- read.table (hydroFile, 
+                            header = FALSE, sep = "")
+  sedigraph <- read.table (sediFile, 
+                           header = FALSE, sep = "")
+  #set up variable names 
+  #
+  # names for variables:
+  #   time = time since start of simulation in seconds
+  #   rain = rainfall intensity in mm/s in input file, converted to mm/h below
+  #   qOutflow = outflow from plot/slope/catchment in mm3/s in input file, converted to litres below
+  #   qSect1, qSect2, qSect3 - flows at three cross sections in mm3/s in input file, converted to    
+  #      litres below
+  #   dSect1, dSect2, dSect3 - mean flow depths at three cross sections in mm in input file
+  #   vSect1, vSect2, vSect3 - mean flow depths at three cross sections in mm in input file
+  names (hydrograph) <- c ("time", "rain", "qOutflow", 
+                          "qSect1", "qSect2", "qSect3", 
+                          "dSect1", "dSect2", "dSect3", 
+                          "vSect1", "vSect2", "vSect3")
+#
+# names for variables:
+#   time = time since start of simulation in seconds
+#   sedPlot = total sediment coming off plot in kg/s
+#   plotFlux = flux of sediment coming off plot in kg/m/s
+#   sedCS1 = sediment crossing section 1 in kg/s
+#   sedCS2 = sediment crossing section 2 in kg/s
+#   sedCS3 = sediment crossing section 3 in kg/s
+#   plotYield = plot sediment yield in kg/m^2/s
+#   yieldCS1 = sediment yield crossing section 1 in kg/m2/s
+#   yieldCS2 = sediment yield crossing section 2 in kg/m2/s
+#   yieldCS3 = sediment yield crossing section 3 in kg/m2/s
+#   phi1 = plot sediment outflow -- proportion < 0.063 mm
+#   phi2 = plot sediment outflow -- proportion >= 0.063 mm - 0.25 mm
+#   phi3 = plot sediment outflow -- proportion >= 0.25 mm - 0.5 mm 
+#   phi4 = plot sediment outflow -- proportion >= 0.5 mm - 2 mm
+#   phi5 = plot sediment outflow -- proportion >= 0.2 mm - 12 mm 
+#   phi6 = plot sediment outflow -- proportion >= 12 mm 
+#
+  names(sedigraph) <- c ("time", "sedPlot", "plotFlux", 
+                         "sedCS1", "sedCS2", "sedCS3", 
+                         "plotYield", "yieldCS1", "yieldCS2", "yieldCS3", 
+                         "phi1", "phi2", "phi3", "phi4", "phi5", "phi6")
+  # and do unit conversions
+  hydrograph$rain <- hydrograph$rain * 3600.  ## to mm/h
+  hydrograph$qOutflow <- hydrograph$qOutflow / 1000000.  ## to litres
+  hydrograph$qSect1 <- hydrograph$qSect1 / 1000000.  ## to litres
+  hydrograph$qSect2 <- hydrograph$qSect2 / 1000000.  ## to litres
+  hydrograph$qSect3 <- hydrograph$qSect3 / 1000000.  ## to litres
+
+  # calculate some useful statistics
+  maxTime <- max (hydrograph$time)
+  maxRain <- max (hydrograph$rain)
+  dt <- hydrograph$time[2] - hydrograph$time[1]
+  totalRain <- sum (hydrograph$rain / 3600.) * dt
+
+  # produce rainfall panel
+  rainPanel <- ggplot (hydrograph) + 
+    geom_col (aes (x = time, y = rain), width = 1, colour = "black") + 
+    scale_y_reverse (limits = c (maxRain * 1.6, 0)) +
+    ylab (expression (paste ("rainfall mm h"^-1))) + 
+    annotate ("text", 
+              x = 0.75 * maxTime, 
+              y = 1.25 * maxRain, 
+              label = paste ("total rainfall:",
+                             round (totalRain, digits = 1),
+                             "mm", sep = " "),
+              colour = "blue") +
+    theme (axis.title.x = element_blank (),
+           axis.text.x = element_blank ())
+
+  #
+  # calculate even more useful stats
+  #
+  maxFlow <- max (hydrograph$qOutflow)
+  totalFlow <- sum (hydrograph$qOutflow) * dt
+  maxSed <- max (sedigraph$sedPlot)
+  totalSed <- sum (sedigraph$sedPlot) * dt
+
+  # produce flow panel
+  flowPanel <- ggplot (hydrograph) +
+    geom_line (aes (x = time, y = qOutflow)) + 
+    xlab ("time  s") + 
+    ylab (expression (paste ("discharge  l s"^-1))) + 
+    annotate ("text", 
+              x = 0.25 * maxTime, 
+              y = 0.75 * maxFlow, 
+              label = paste ("total runoff:", 
+                             round (totalFlow, digits = 1), 
+                             "l", sep = " "))  +
+    theme (axis.title.x = element_blank (),
+           axis.text.x = element_blank ())
+  # produce sediment panel
+  sedPanel <- ggplot (sedigraph) + 
+    geom_line (aes (x = time, y = sedPlot)) + 
+    xlab ("time  s") + 
+    ylab (expression (paste ("sed loss  kg s"^-1))) + 
+    annotate ("text", 
+              x = 0.25 * maxTime, 
+              y = 0.75 * maxSed, 
+              label = paste ("total sediment:", 
+                             round (totalSed, 
+                                    digits = 3), 
+                             "kg", sep = " ")) +
+    theme (axis.title.x = element_blank (),
+           axis.text.x = element_blank ())
+  # produce particle size panel
+  phiPanel <- ggplot (sedigraph, aes (x = time)) + 
+    geom_line (aes (y = phi1, colour = "1")) + 
+    geom_line (aes (y = phi2, colour = "2")) + 
+    geom_line (aes (y = phi3, colour = "3")) +  
+    geom_line (aes (y = phi4, colour = "4")) + 
+    geom_line (aes (y = phi5, colour = "5")) + 
+    geom_line (aes (y = phi6, colour = "6")) + 
+    labs (x = "time  s",
+          y = "sed proportion",
+          colour = "phi") +
+    theme (legend.position = "inside",
+           legend.position.inside = c (0.15, 0.9),
+           legend.direction = "horizontal")
+  # group panels vertically
+  allPanels <- rbind (ggplotGrob (rainPanel),
+                      ggplotGrob (flowPanel),
+                      ggplotGrob (sedPanel),
+                      ggplotGrob (phiPanel),
+                      size = "max")
+  # open new window and plot panels
+  windows ()
+  grid.newpage ()
+  grid.draw (allPanels)
+
+  # save the panels directly to file
+  ggsave (filename = paste0 (outPath, outFile), 
+          allPanels,
+          width = 210, height = 250, units = "mm")
+  #return some useful statistics
+  summaryOutput <- data.frame ("Total Rainfall" = totalRain,
+                               "Total Flow" = totalFlow,
+                               "Total Sediment" = totalSed)
+  
+  return (summaryOutput)
+
+}
+
+```
+Then call the function with the relevant parameters (note that I've cunningly used the default names specified in the function for all but the location of the data files, so that's the only thing specified here).  I've also provided a simple data frame outputting the average statistics.
+
+```{r}
+mahleranPlotOutflows (filePath = mahleranOutputFolder) 
+```  
+
+When calling the function, it might be better to specify which run number you're interested in so you don't get confused:
+
+```{r}
+mahleranPlotOutflows (runNumber = 1, filePath = mahleranOutputFolder) 
+``` 
+And you should see the same output as before.  You don't need to specify the names of the variables in the input as long as they're in the same order as specified in the function call.  So, a third way of getting the same output is:
+
+```{r}
+mahleranPlotOutflows (1, mahleranOutputFolder) 
+```
+
+Before, you changed the input file to use the doubled rainfall amount.  Use your function to see how it is different.  What happens if you run the function with a run number that doesn't exist in your output folder?
+
+Now copy the code for this function and paste it into a new R script file called MahleranVis.R (with a .R extension, NOT an Rmd file).  Then all you need to do to be able to use the function in any other code is to add:
+
+```{r, eval = FALSE}
+# DON'T run this -- it won't work as you need to specify the path name properly
+#  and you need to have generated the MahleranVis.R file
+source ("Path/To/Script/File/On/Your/Computer/MahleranVis.R")
+```
+
+Before we leave this dataset, let's have a quick think about what else we might want to do with it.  For example, we might want to see if there are patterns in the link between precipitation and runoff and sediment transfer rather than just plotting results as time series.  Again we can plot variable by variable, or use facet_wrap in ggplot to simplify things:
+
+```{r}
+combinedData %>%
+  select (-time) %>%
+  pivot_longer (-rain, names_to = "variable") %>%
+  ggplot () +
+    geom_point (aes (x = rain, y = value)) +
+    facet_wrap (~variable, scales = "free") +
+    labs (x = "precipitation [mm]", 
+          y = "water or sediment discharge")
+```
+Note the approach again not to change the dataset, but we take the dataframe, pass it through a couple of formatting statements from tidyverse and then plot.
+
+
+
+## What About the Other Output Files?
+
+You should be able to modify the script above straightforwardly to visualize the other time-series data.  In the meantime, let's look at visualizing the spatial outputs given this is a fully distributed model.
+
+The map outputs from MAHLERAN are as follows:
+
+-------------      --------------------------------------------------------------
+File Name	         Description 
+-------------      --------------------------------------------------------------
+dschg***.asc       Total event discharge [m3]
+
+depth***.asc	     Peak flow depth [mm]
+
+veloc***.asc       Peak flow velocity [mm s–1]
+
+sedtr***.asc       Sediment transport [total sediment mass in kg]
+
+ksat_***.asc       Final infiltration rate (copied from the input) 
+
+detac***.asc	     Total detachment [kg]
+
+depos***.asc	     Total deposition [kg]
+
+soild***.asc	     Map of dmax_soil [m]
+
+soilv***.asc       Map of vmax_soil [mm s–1]
+
+neter***.asc       Net erosion [kg]
+
+radet***.asc       Total raindrop detachment [kg]
+
+fldet***.asc       Total flow detachment [kg]
+
+nutri***. asc      NH4 transport [total ammonium mass in mg]
+
+pnitr***.asc       Particulate-bound nitrate flux from each cell (g)
+
+pammo***.asc       Particulate-bound ammonium flux from each cell (g)
+
+pTNxx***.asc       Particulate-bound TN flux from each cell (g)
+
+pTPxx***.asc       Particulate-bound TP flux from each cell (g)
+
+pICxx***.asc       Particulate-bound IC flux from each cell (g)
+
+pTCxx***.asc       Particulate-bound TC flux from each cell (g)
+
+-------------      -----------------------------------------------------------
+
+Again, the *** represents the run number as above.
+
+You can open the .asc files to see they are human readable raster files and have simple information about grid and cell size.  ArcGIS or QGIS will open these files directly.  But we also saw last time how to open raster files and plot them using the terra package in R.  Let's start by looking at the total event discharge:
+
+```{r}
+dschgFile <- "dschg001.asc"
+
+qMap <- rast (paste0 (mahleranOutputFolder, dschgFile))
+
+# notice we can scale the discharge directly -- here converting from cubic metres to litres
+plot (qMap * 1000.)
+
+```
+
+```{r}
+sedQFile <- "sedtr001.asc"
+
+sedQMap <- rast (paste0 (mahleranOutputFolder, sedQFile))
+
+# there are artefacts in the output on the bottom row which we need to remove from the map
+#   before plotting (these artefacts are about the way outflows are calculated -- there is
+#   nothing wrong with the results)
+sedQMap[sedQMap < 0] <- 0  #replace all negative values with zeroes
+plot (sedQMap)
+
+```
+
+It's useful to plot the runoff and sediment transport values side-by-side.
+
+```{r}
+#tell R that we want one row and two columns of plots
+par (mfrow = c (1, 2))
+#plot the discharge map in the first column
+plot (qMap * 1000., main = "runoff  [l]")
+#plot the sediment transport map in the second column
+plot (sedQMap, main = "sediment transport  [kg]")
+#tell R to revert to a single plot at a time
+par (mfrow = c (1, 1))
+
+```
+
+Try writing a function that will plot the runoff and sediment discharge next to each other like this, specifying the run number.
+
+Try producing a further function by modifying the previous one to show the flow depth and velocity (i.e. flow hydraulics) as well as the water and sediment discharges.  Save all the functions in your MahleranVis.R script file for when you need them for further analyses.
+
